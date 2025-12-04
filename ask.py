@@ -96,6 +96,9 @@ user_prompt = '''
 文档内容：
 {cleaned_markdown_text}
 
+初步调用的可读性指标（仅供参考）：
+{readability}
+
 请从以下维度进行深入分析：
 
 1. 【基础完整性检查】
@@ -140,7 +143,7 @@ user_prompt = '''
 
 
 
-def analyze_readme_with_llm(markdown_content, api_key):
+def analyze_readme_with_llm(markdown_content, readability, api_key):
     client = openai.OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
     
     try:
@@ -148,13 +151,14 @@ def analyze_readme_with_llm(markdown_content, api_key):
             model="deepseek-chat",  # 或 "gpt-3.5-turbo"
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt.format(cleaned_markdown_text=markdown_content)}
+                {"role": "user", "content": user_prompt.format(cleaned_markdown_text=markdown_content, readability=json.dumps(readability))}
             ],
             response_format={"type": "json_object"}  # 强制JSON输出
         )
-        print(response)
         # 解析响应
         result_json = json.loads(response.choices[0].message.content)
+        result_json.update({"readability": readability})
+        print(result_json)
         return result_json
         
     except Exception as e:

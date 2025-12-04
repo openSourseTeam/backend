@@ -4,3 +4,5 @@ requests
 python-multipart
 python-dotenv
 openai
+pyphen
+nltk

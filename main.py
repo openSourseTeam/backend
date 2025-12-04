@@ -1,13 +1,20 @@
+
+import os
+os.environ["NLTK_DATA"] = "./nltk_data"
+
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
 from typing import Dict, Any
 import logging
-import os
 
-from models import DownloadRequest, DownloadResponse, HealthResponse
+
+from models import DownloadRequest, DownloadResponse
 from github_service import GitHubService
+
+from readability import get_readability
+
+# import nltk
+# nltk.set_proxy('http://127.0.0.1:7890')
 
 # 配置日志
 logging.basicConfig(
@@ -116,7 +123,42 @@ async def download_readme(request: DownloadRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"服务器内部错误: {str(e)}"
         )
+
+
+@app.post("/api/analyze-readme-init")
+async def analyze_readme(request: Dict[str, Any]):
+    """
+    分析README内容的质量
     
+    - **content**: README的Markdown内容
+    """
+    logger.info("收到README分析请求")
+    
+    try:
+        # 检查请求内容
+        content = request.get("content", "").strip()
+        if not content:
+            logger.error("README内容为空")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="README内容不能为空"
+            )
+        
+        readability = get_readability(content)
+        
+        logger.info("README分析成功")
+        return readability
+    
+    except HTTPException:
+        # 重新抛出已有的HTTP异常
+        raise
+    except Exception as e:
+        logger.error(f"服务器内部错误: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"服务器内部错误: {str(e)}"
+        )
+
 from ask import analyze_readme_with_llm  # 导入分析函数
 @app.post("/api/analyze-readme")
 async def analyze_readme(request: Dict[str, Any]):
@@ -137,10 +179,12 @@ async def analyze_readme(request: Dict[str, Any]):
                 detail="README内容不能为空"
             )
         
+        readability = get_readability(content)
+
         # 调用分析函数
         api_key = 'sk-99ed7f2e56bd478cb3147fd1593d4157'
         # api_key = os.getenv("OPENAI_API_KEY", "your_openai_api_key")  # 从环境变量中获取API Key
-        result = analyze_readme_with_llm(content, api_key)
+        result = analyze_readme_with_llm(content, readability, api_key)
         
         if "error" in result:
             logger.error(f"README分析失败: {result['error']}")
