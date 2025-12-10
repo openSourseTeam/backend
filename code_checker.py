@@ -284,12 +284,22 @@ class DocumentCodeChecker:
                 {"name": "使用/用法", "patterns": [r"使用", r"用法", r"usage", r"使用方法", r"how to use"], "required": True},
             ],
             "contributing": [
-                {"name": "贡献流程", "patterns": [r"贡献", r"contributing", r"如何贡献"], "required": True},
-                {"name": "代码规范", "patterns": [r"代码规范", r"code style", r"coding standards"], "required": True},
-                {"name": "开发环境", "patterns": [r"开发环境", r"development", r"setup"], "required": False},
+                {"name": "贡献流程", "patterns": [r"贡献", r"contributing", r"how to contribute", r"pull request", r"流程", r"workflow"], "required": True},
+                {"name": "环境搭建", "patterns": [r"环境", r"setup", r"development", r"environment", r"install"], "required": True},
+                {"name": "代码规范", "patterns": [r"代码规范", r"code style", r"coding standards", r"style guide"], "required": True},
+                {"name": "测试指南", "patterns": [r"测试", r"test", r"testing"], "required": False},
             ],
             "changelog": [
+                {"name": "未发布版本", "patterns": [r"unreleased", r"未发布"], "required": False},
                 {"name": "版本记录", "patterns": [r"v?\d+\.\d+", r"version", r"\d{4}-\d{2}-\d{2}"], "required": True},
+            ],
+            "code_of_conduct": [
+                {"name": "承诺/誓言", "patterns": [r"pledge", r"commitment", r"承诺"], "required": False},
+                {"name": "标准/准则", "patterns": [r"standards", r"behavior", r"准则", r"行为"], "required": True},
+                {"name": "举报/执行", "patterns": [r"enforcement", r"reporting", r"contact", r"举报", r"联系"], "required": True},
+            ],
+            "license": [
+                 # License usually doesn't have sections, but we can check if it looks like a license
             ]
         }
         

@@ -12,6 +12,7 @@ from models import DownloadRequest, DownloadResponse
 from github_service import GitHubService
 
 from readability import get_readability
+from code_checker import check_document_quality
 
 # import nltk
 # nltk.set_proxy('http://127.0.0.1:7890')
@@ -125,170 +126,102 @@ async def download_readme(request: DownloadRequest):
         )
 
 
-@app.post("/api/analyze-readme-init")
-async def analyze_readme_init(request: Dict[str, Any]):
+@app.post("/api/scan-repo")
+async def scan_repo_docs(request: DownloadRequest):
     """
-    第一部分：代码层面审查（规则检测，不使用AI）
-    包含可读性分析和代码质量检查
-    
-    - **content**: README的Markdown内容
-    - **doc_type**: 文档类型（可选，默认readme）
+    扫描仓库文档
+    此步骤只获取文档内容，不进行深入分析
     """
-    logger.info("收到代码审查请求（第一部分）")
+    logger.info(f"收到文档扫描请求: {request.repo_url}")
     
     try:
-        # 检查请求内容
-        content = request.get("content", "").strip()
-        if not content:
-            logger.error("README内容为空")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="README内容不能为空"
-            )
+        owner, repo = github_service.extract_repo_info(request.repo_url)
+        if not owner or not repo:
+            raise HTTPException(status_code=400, detail="无效的GitHub仓库URL")
+            
+        # 获取所有文档
+        docs = github_service.get_all_repo_docs(owner, repo)
         
-        doc_type = request.get("doc_type", "readme")
+        # 统计找到的文档
+        found_count = sum(1 for v in docs.values() if v is not None)
+        logger.info(f"扫描完成，找到 {found_count} 个文档")
         
-        # 第一部分：可读性分析
-        logger.info("执行可读性分析...")
-        readability = get_readability(content)
-        
-        # 第二部分：代码质量检查
-        logger.info("执行代码质量检查...")
-        code_check_results = check_document_quality(content, doc_type)
-        
-        # 合并结果
-        result = {
-            "stage": "代码审查（第一部分）",
-            "readability": readability,
-            "code_check": code_check_results,
-            "summary": {
-                "readability_level": readability.get("text_standard", "N/A"),
-                "code_check_passed": code_check_results["summary"]["overall_passed"],
-                "code_issues_count": code_check_results["summary"]["total_issues"],
-                "checks_completed": code_check_results["summary"]["total_checks"]
-            }
-        }
-        
-        logger.info(f"代码审查完成: {result['summary']['checks_completed']} 项检查，发现 {result['summary']['code_issues_count']} 个问题")
-        return result
-    
-    except HTTPException:
-        # 重新抛出已有的HTTP异常
-        raise
-    except Exception as e:
-        logger.error(f"服务器内部错误: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"服务器内部错误: {str(e)}"
-        )
-
-from ask import analyze_readme_with_llm  # 导入分析函数
-from code_checker import check_document_quality  # 导入代码检查模块
-
-@app.post("/api/analyze-readme")
-async def analyze_readme(request: Dict[str, Any]):
-    """
-    双轨制完整分析：第一部分代码审查 + 第二部分AI分析
-    
-    - **content**: README的Markdown内容
-    - **doc_type**: 文档类型（可选，默认readme）
-    """
-    logger.info("收到双轨制完整分析请求")
-    
-    try:
-        # 检查请求内容
-        content = request.get("content", "").strip()
-        if not content:
-            logger.error("README内容为空")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="README内容不能为空"
-            )
-        
-        doc_type = request.get("doc_type", "readme")
-        
-        # ========== 第一部分：代码审查 ==========
-        logger.info("【第一部分】执行代码审查...")
-        
-        # 可读性分析
-        readability = get_readability(content)
-        
-        # 代码质量检查
-        code_check_results = check_document_quality(content, doc_type)
-        
-        logger.info(f"【第一部分】完成: 发现 {code_check_results['summary']['total_issues']} 个问题")
-        
-        # ========== 第二部分：AI 分析 ==========
-        logger.info("【第二部分】执行AI语义分析...")
-        
-        # 调用分析函数
-        api_key = 'sk-99ed7f2e56bd478cb3147fd1593d4157'
-        # api_key = os.getenv("OPENAI_API_KEY", "your_openai_api_key")  # 从环境变量中获取API Key
-        ai_analysis = analyze_readme_with_llm(content, readability, api_key)
-        
-        if "error" in ai_analysis:
-            logger.error(f"AI分析失败: {ai_analysis['error']}")
-            # AI分析失败，仍然返回代码审查结果
-            return {
-                "success": False,
-                "part_1_code_review": {
-                    "readability": readability,
-                    "code_check": code_check_results
-                },
-                "part_2_ai_analysis": None,
-                "error": ai_analysis['error']
-            }
-        
-        logger.info(f"【第二部分】完成: AI评分 {ai_analysis.get('overall_score', 0)}/100")
-        
-        # ========== 合并两部分结果 ==========
-        complete_result = {
+        return {
             "success": True,
-            "evaluation_mode": "双轨制评估",
-            "part_1_code_review": {
-                "description": "代码层面规则检测（快速、无成本）",
-                "readability": readability,
-                "code_check": code_check_results
+            "repo_info": {
+                "owner": owner,
+                "repo": repo,
+                "full_name": f"{owner}/{repo}"
             },
-            "part_2_ai_analysis": {
-                "description": "AI语义理解分析（深度、有成本）",
-                "overall_score": ai_analysis.get("overall_score", 0),
-                "dimension_scores": ai_analysis.get("dimension_scores", {}),
-                "strengths": ai_analysis.get("strengths", []),
-                "missing_sections": ai_analysis.get("missing_sections", []),
-                "beginner_confusion_points": ai_analysis.get("beginner_confusion_points", []),
-                "code_quality_issues": ai_analysis.get("code_quality_issues", []),
-                "structural_issues": ai_analysis.get("structural_issues", []),
-                "language_issues": ai_analysis.get("language_issues", []),
-                "priority_recommendations": ai_analysis.get("priority_recommendations", []),
-                "suggestions": ai_analysis.get("suggestions", []),
-                "convention_issues": ai_analysis.get("convention_issues", [])
-            },
-            "final_summary": {
-                "code_check_passed": code_check_results["summary"]["overall_passed"],
-                "code_issues_count": code_check_results["summary"]["total_issues"],
-                "ai_overall_score": ai_analysis.get("overall_score", 0),
-                "readability_level": readability.get("text_standard", "N/A"),
-                "recommendation": _generate_recommendation(
-                    code_check_results["summary"]["overall_passed"],
-                    code_check_results["summary"]["total_issues"],
-                    ai_analysis.get("overall_score", 0)
-                )
-            }
+            "docs": docs
         }
-        
-        logger.info("双轨制分析完成")
-        return complete_result
-    
     except HTTPException:
-        # 重新抛出已有的HTTP异常
         raise
     except Exception as e:
-        logger.error(f"服务器内部错误: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"服务器内部错误: {str(e)}"
-        )
+        logger.error(f"扫描失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/analyze-project")
+async def analyze_project(request: Dict[str, Any]):
+    """
+    分析项目文档（接收 scan-repo 返回的 docs 结构）
+    """
+    logger.info("收到项目分析请求")
+    
+    try:
+        docs = request.get("docs", {})
+        if not docs:
+            raise HTTPException(status_code=400, detail="未提供文档内容")
+            
+        # 1. 规则检查
+        rule_check_results = {}
+        combined_markdown = ""
+        
+        for doc_type, doc_info in docs.items():
+            if doc_info and 'content' in doc_info:
+                content = doc_info['content']
+                # 累加用于AI分析的文本
+                combined_markdown += f"\n\n# FILE: {doc_info['filename']} ({doc_type.upper()})\n\n{content}"
+                
+                # 单个文档规则检查
+                check_result = check_document_quality(content, doc_type)
+                rule_check_results[doc_type] = check_result
+        
+        # 2. AI 分析
+        from ask import analyze_readme_with_llm # Note: This imports the function we modified, even if name is old
+        from fastapi.concurrency import run_in_threadpool
+
+        # We need to construct the input for LLM
+        # The modified ask.py expects 'docs_content' and 'rule_checks' in user prompt format
+        
+        # 简化规则检查结果给LLM
+        simple_rule_checks = {}
+        for dtype, res in rule_check_results.items():
+            simple_rule_checks[dtype] = {
+                "issues_count": res['summary']['total_issues'],
+                "missing_sections": res['section_completeness_check'].get('missing_sections', [])
+            }
+            
+        api_key = 'sk-99ed7f2e56bd478cb3147fd1593d4157'
+        
+        # 调用ask.py中的分析函数 (注意：我们需要适配 ask.py 的参数)
+        # 实际上我们修改了 ask.py 的 user_prompt, 但函数签名还是 analyze_readme_with_llm(markdown_content, readability, api_key)
+        # 我们这里把 simple_rule_checks 当作 readability 传进去，因为 prompt 里使用的是 {readability} 占位符
+        
+        logger.info("开始调用 LLM 进行分析...")
+        ai_result = await run_in_threadpool(analyze_readme_with_llm, combined_markdown, simple_rule_checks, api_key)
+        logger.info("LLM 分析完成")
+        
+        return {
+            "success": True,
+            "rule_checks": rule_check_results,
+            "ai_analysis": ai_result
+        }
+
+    except Exception as e:
+        logger.error(f"分析失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def _generate_recommendation(code_passed: bool, code_issues: int, ai_score: int) -> str:

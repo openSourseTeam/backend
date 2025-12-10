@@ -140,3 +140,44 @@ class GitHubService:
                 return {'error': f'处理响应失败: {str(e)}'}
         
         return {'error': '未找到README文件'}
+
+    def get_all_repo_docs(self, owner: str, repo: str) -> Dict[str, Any]:
+        """获取仓库的所有主要文档"""
+        docs_to_find = {
+            'readme': ['README.md', 'readme.md', 'README', 'readme', 'README.txt'],
+            'contributing': ['CONTRIBUTING.md', 'contributing.md', 'CONTRIBUTING', 'contributing'],
+            'code_of_conduct': ['CODE_OF_CONDUCT.md', 'code_of_conduct.md', 'CODE_OF_CONDUCT'],
+            'changelog': ['CHANGELOG.md', 'changelog.md', 'CHANGELOG', 'HISTORY.md'],
+            'license': ['LICENSE', 'license', 'LICENSE.md', 'license.md', 'LICENSE.txt']
+        }
+        
+        results = {}
+        
+        for doc_type, filenames in docs_to_find.items():
+            found = False
+            for filename in filenames:
+                url = f'https://api.github.com/repos/{owner}/{repo}/contents/{filename}'
+                try:
+                    response = self.session.get(url, headers=headers)
+                    if response.status_code == 200:
+                        data = response.json()
+                        if 'content' in data:
+                            content = base64.b64decode(data['content']).decode('utf-8')
+                            results[doc_type] = {
+                                'content': content,
+                                'filename': filename,
+                                'download_url': data.get('download_url', ''),
+                                'html_url': data.get('html_url', ''),
+                                'size': data.get('size', 0)
+                            }
+                            found = True
+                            logger.info(f"找到 {doc_type}: {filename}")
+                            break # 找到一种后缀即可
+                except Exception as e:
+                    logger.warning(f"检查 {filename} 时出错: {e}")
+                    continue
+            
+            if not found:
+                results[doc_type] = None
+                
+        return results
