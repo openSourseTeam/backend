@@ -7,3 +7,4 @@ openai
 pyphen
 nltk
 mistune
+textstat

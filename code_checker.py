@@ -8,6 +8,71 @@ import mistune
 logger = logging.getLogger(__name__)
 
 
+# 文档类型检查策略配置
+DOC_TYPE_CHECK_STRATEGY = {
+    "readme": {
+        "code_block_check": "strict",      # 严格：必须有代码块且需要语言标识
+        "link_check": "strict",            # 严格：链接必须可访问
+        "heading_structure_check": "strict" # 严格：标题层级不能跳跃
+    },
+    "contributing": {
+        "code_block_check": "strict",      # 通常有代码示例
+        "link_check": "strict",
+        "heading_structure_check": "strict"
+    },
+    "license": {
+        "code_block_check": "skip",        # 跳过：LICENSE通常没有代码块
+        "link_check": "loose",             # 宽松：可能没有链接
+        "heading_structure_check": "loose"  # 宽松：可能只有一级标题或没有标题
+    },
+    "changelog": {
+        "code_block_check": "skip",        # 跳过：CHANGELOG通常没有代码块
+        "link_check": "normal",            # 普通：可能有PR/Issue链接
+        "heading_structure_check": "normal" # 普通：版本号作为标题
+    },
+    "code_of_conduct": {
+        "code_block_check": "skip",        # 跳过：行为准则通常没有代码块
+        "link_check": "normal",
+        "heading_structure_check": "normal"
+    },
+    "security": {
+        "code_block_check": "skip",        # 跳过：安全政策通常没有代码块
+        "link_check": "strict",            # 严格：需要联系方式链接
+        "heading_structure_check": "normal"
+    },
+    "support": {
+        "code_block_check": "skip",        # 跳过：支持文档通常没有代码块
+        "link_check": "strict",            # 严格：需要资源链接
+        "heading_structure_check": "normal"
+    },
+    "wiki": {
+        "code_block_check": "normal",      # 普通：Wiki可能有代码示例
+        "link_check": "strict",            # 严格：Wiki通常有很多内部链接
+        "heading_structure_check": "strict" # 严格：需要清晰的导航结构
+    },
+    "docs": {
+        "code_block_check": "normal",      # 普通：文档目录可能有示例
+        "link_check": "strict",            # 严格：需要导航链接
+        "heading_structure_check": "strict" # 严格：需要清晰的结构
+    },
+    "installation": {
+        "code_block_check": "strict",      # 严格：必须有安装命令示例
+        "link_check": "normal",
+        "heading_structure_check": "strict"
+    },
+    "usage": {
+        "code_block_check": "strict",      # 严格：必须有使用示例
+        "link_check": "normal",
+        "heading_structure_check": "strict"
+    },
+    "api": {
+        "code_block_check": "strict",      # 严格：必须有API调用示例
+        "link_check": "normal",
+        "heading_structure_check": "strict"
+    }
+}
+
+
 class DocumentCodeChecker:
     """文档代码层面质量检查器"""
     
@@ -16,22 +81,37 @@ class DocumentCodeChecker:
         self.timeout = 5  # HTTP 请求超时时间
         self.link_check_enabled = True
         self.markdown_parser = mistune.create_markdown(renderer=None)  # 创建 Markdown 解析器
+    
+    def get_check_strategy(self, doc_type: str) -> Dict[str, str]:
+        """
+        获取文档类型的检查策略
         
-    def check_all(self, markdown_content: str) -> Dict[str, Any]:
+        Args:
+            doc_type: 文档类型
+            
+        Returns:
+            检查策略配置
+        """
+        return DOC_TYPE_CHECK_STRATEGY.get(doc_type, DOC_TYPE_CHECK_STRATEGY["readme"])
+        
+    def check_all(self, markdown_content: str, doc_type: str = "readme") -> Dict[str, Any]:
         """
         执行所有代码层面的检查
         
         Args:
             markdown_content: Markdown 文档内容
+            doc_type: 文档类型（readme, contributing等）
             
         Returns:
             包含所有检查结果的字典
         """
+        strategy = self.get_check_strategy(doc_type)
+        
         results = {
-            "link_check": self.check_links(markdown_content),
-            "code_block_check": self.check_code_blocks(markdown_content),
-            "heading_structure_check": self.check_heading_structure(markdown_content),
-            "section_completeness_check": self.check_section_completeness(markdown_content),
+            "link_check": self.check_links(markdown_content, strategy["link_check"]),
+            "code_block_check": self.check_code_blocks(markdown_content, strategy["code_block_check"]),
+            "heading_structure_check": self.check_heading_structure(markdown_content, strategy["heading_structure_check"]),
+            "section_completeness_check": self.check_section_completeness(markdown_content, doc_type),
             "markdown_syntax_check": self.check_markdown_syntax(markdown_content),
         }
         
@@ -40,13 +120,14 @@ class DocumentCodeChecker:
         
         return results
     
-    def check_links(self, markdown_content: str) -> Dict[str, Any]:
+    def check_links(self, markdown_content: str, strictness: str = "strict") -> Dict[str, Any]:
         """
         检查链接可访问性
         提取文档中的所有链接，检查 HTTP 状态码
         
         Args:
             markdown_content: Markdown 文档内容
+            strictness: 检查严格程度 (strict/normal/loose)
             
         Returns:
             链接检查结果
@@ -74,6 +155,22 @@ class DocumentCodeChecker:
                 total_links.append({"text": url, "url": url, "type": "direct"})
                 checked_urls.add(url)
         
+        # 根据严格程度决定是否实际检查链接
+        if strictness == "loose":
+            # 宽松模式：只统计链接数量，不实际检查
+            return {
+                "total_links": len(total_links),
+                "valid_links": len(total_links),
+                "invalid_links": 0,
+                "timeout_links": 0,
+                "valid_links_list": total_links,
+                "invalid_links_list": [],
+                "timeout_links_list": [],
+                "check_passed": True,
+                "strictness": strictness,
+                "note": "宽松模式：跳过链接有效性检查（适用于LICENSE等文档）"
+            }
+        
         # 执行链接检查
         valid_links = []
         invalid_links = []
@@ -99,6 +196,14 @@ class DocumentCodeChecker:
             else:
                 invalid_links.append(link_result)
         
+        # 根据严格程度判断是否通过
+        if strictness == "normal":
+            # 普通模式：允许少量超时，但不能有无效链接
+            check_passed = len(invalid_links) == 0
+        else:  # strict
+            # 严格模式：不允许有无效链接或超时
+            check_passed = len(invalid_links) == 0 and len(timeout_links) == 0
+        
         return {
             "total_links": len(total_links),
             "valid_links": len(valid_links),
@@ -107,7 +212,8 @@ class DocumentCodeChecker:
             "valid_links_list": valid_links,
             "invalid_links_list": invalid_links,
             "timeout_links_list": timeout_links,
-            "check_passed": len(invalid_links) == 0
+            "check_passed": check_passed,
+            "strictness": strictness
         }
     
     def _check_single_link(self, url: str) -> Dict[str, Any]:
@@ -167,17 +273,31 @@ class DocumentCodeChecker:
                 "error": str(e)
             }
     
-    def check_code_blocks(self, markdown_content: str) -> Dict[str, Any]:
+    def check_code_blocks(self, markdown_content: str, strictness: str = "strict") -> Dict[str, Any]:
         """
         检查代码块语言标识
         检查代码块是否标注了语言类型
         
         Args:
             markdown_content: Markdown 文档内容
+            strictness: 检查严格程度 (strict/normal/skip)
             
         Returns:
             代码块检查结果
         """
+        # 如果是跳过模式，直接返回通过
+        if strictness == "skip":
+            return {
+                "total_code_blocks": 0,
+                "blocks_with_language": 0,
+                "blocks_without_language": 0,
+                "languages_used": [],
+                "language_counts": {},
+                "check_passed": True,
+                "strictness": strictness,
+                "note": "跳过代码块检查（适用于LICENSE、CHANGELOG等文档）"
+            }
+        
         # 匹配代码块: ```language 或 ```
         code_block_pattern = r'```(\w+)?'
         matches = re.findall(code_block_pattern, markdown_content)
@@ -195,25 +315,44 @@ class DocumentCodeChecker:
         for lang in languages_used:
             language_counts[lang] = language_counts.get(lang, 0) + 1
         
+        # 根据严格程度判断是否通过
+        if strictness == "strict":
+            # 严格模式：所有代码块都必须有语言标识
+            check_passed = blocks_without_language == 0
+            issues = [
+                f"发现 {blocks_without_language} 个代码块缺少语言标识"
+            ] if blocks_without_language > 0 else []
+        else:  # normal
+            # 普通模式：允许少量代码块没有语言标识（< 20%）
+            if total_blocks == 0:
+                check_passed = True
+                issues = []
+            else:
+                ratio = blocks_without_language / total_blocks
+                check_passed = ratio < 0.2
+                issues = [
+                    f"发现 {blocks_without_language}/{total_blocks} 个代码块缺少语言标识（{ratio*100:.1f}%）"
+                ] if not check_passed else []
+        
         return {
             "total_code_blocks": total_blocks,
             "blocks_with_language": blocks_with_language // 2,
             "blocks_without_language": blocks_without_language,
             "languages_used": list(set(languages_used)),
             "language_counts": language_counts,
-            "check_passed": blocks_without_language == 0,
-            "issues": [
-                f"发现 {blocks_without_language} 个代码块缺少语言标识"
-            ] if blocks_without_language > 0 else []
+            "check_passed": check_passed,
+            "strictness": strictness,
+            "issues": issues
         }
     
-    def check_heading_structure(self, markdown_content: str) -> Dict[str, Any]:
+    def check_heading_structure(self, markdown_content: str, strictness: str = "strict") -> Dict[str, Any]:
         """
         检查标题结构规范性
         检查标题层级是否合理（不应该跳级）
         
         Args:
             markdown_content: Markdown 文档内容
+            strictness: 检查严格程度 (strict/normal/loose)
             
         Returns:
             标题结构检查结果
@@ -229,6 +368,23 @@ class DocumentCodeChecker:
                 text = match.group(2).strip()
                 headings.append({"level": level, "text": text})
         
+        # 宽松模式：不检查层级跳跃
+        if strictness == "loose":
+            level_counts = {}
+            for heading in headings:
+                level = heading["level"]
+                level_counts[f"h{level}"] = level_counts.get(f"h{level}", 0) + 1
+            
+            return {
+                "total_headings": len(headings),
+                "level_counts": level_counts,
+                "headings": headings,
+                "issues": [],
+                "check_passed": True,
+                "strictness": strictness,
+                "note": "宽松模式：跳过标题层级检查（适用于LICENSE等文档）"
+            }
+        
         # 检查标题层级跳跃
         issues = []
         prev_level = 0
@@ -238,13 +394,20 @@ class DocumentCodeChecker:
             
             # 检查是否跳级（例如从 # 直接到 ###）
             if prev_level > 0 and level > prev_level + 1:
-                issues.append({
+                issue = {
                     "type": "level_skip",
                     "heading": heading["text"],
                     "level": level,
                     "prev_level": prev_level,
                     "message": f"标题 '{heading['text']}' 从 H{prev_level} 跳到 H{level}，建议使用 H{prev_level + 1}"
-                })
+                }
+                
+                # 普通模式：跳跃2级以上才算问题
+                if strictness == "normal":
+                    if level > prev_level + 2:
+                        issues.append(issue)
+                else:  # strict
+                    issues.append(issue)
             
             prev_level = level
         
@@ -259,7 +422,8 @@ class DocumentCodeChecker:
             "level_counts": level_counts,
             "headings": headings,
             "issues": issues,
-            "check_passed": len(issues) == 0
+            "check_passed": len(issues) == 0,
+            "strictness": strictness
         }
     
     def check_section_completeness(self, markdown_content: str, 
@@ -300,6 +464,44 @@ class DocumentCodeChecker:
             ],
             "license": [
                  # License usually doesn't have sections, but we can check if it looks like a license
+            ],
+            "security": [
+                {"name": "报告漏洞", "patterns": [r"reporting", r"report", r"漏洞", r"vulnerability", r"security issue"], "required": True},
+                {"name": "联系方式", "patterns": [r"contact", r"email", r"联系", r"报告地址"], "required": True},
+                {"name": "响应流程", "patterns": [r"process", r"response", r"disclosure", r"流程"], "required": False},
+                {"name": "支持版本", "patterns": [r"supported versions", r"支持版本", r"version"], "required": False},
+            ],
+            "support": [
+                {"name": "获取帮助", "patterns": [r"getting help", r"how to get help", r"获取帮助", r"如何提问", r"how to ask", r"asking for help"], "required": True},
+                {"name": "资源/链接", "patterns": [r"resources", r"documentation", r"资源", r"文档", r"links"], "required": False},
+                {"name": "社区/论坛", "patterns": [r"community", r"forum", r"社区", r"论坛", r"discussion"], "required": False},
+            ],
+            "wiki": [
+                {"name": "目录/索引", "patterns": [r"table of contents", r"index", r"目录", r"索引", r"导航"], "required": False},
+                {"name": "概述/介绍", "patterns": [r"overview", r"introduction", r"概述", r"简介"], "required": False},
+                # Wiki 比较自由，不强制要求章节
+            ],
+            "docs": [
+                {"name": "快速开始", "patterns": [r"quick start", r"getting started", r"快速开始", r"入门"], "required": True},
+                {"name": "目录/导航", "patterns": [r"table of contents", r"navigation", r"目录", r"导航"], "required": False},
+                {"name": "文档结构", "patterns": [r"documentation", r"structure", r"文档", r"guide"], "required": False},
+            ],
+            "installation": [
+                {"name": "前置要求", "patterns": [r"requirements", r"prerequisites", r"前置", r"依赖"], "required": True},
+                {"name": "安装步骤", "patterns": [r"installation", r"install", r"setup", r"安装步骤", r"安装方法"], "required": True},
+                {"name": "验证安装", "patterns": [r"verify", r"test", r"验证", r"测试"], "required": False},
+                {"name": "故障排除", "patterns": [r"troubleshooting", r"问题", r"常见错误", r"faq"], "required": False},
+            ],
+            "usage": [
+                {"name": "基本用法", "patterns": [r"basic usage", r"基本用法", r"快速开始", r"getting started"], "required": True},
+                {"name": "示例/Examples", "patterns": [r"examples", r"示例", r"example"], "required": True},
+                {"name": "高级用法", "patterns": [r"advanced", r"高级", r"进阶"], "required": False},
+            ],
+            "api": [
+                {"name": "概述/介绍", "patterns": [r"overview", r"introduction", r"概述", r"简介"], "required": False},
+                {"name": "接口/方法", "patterns": [r"methods", r"functions", r"endpoints", r"接口", r"方法", r"api"], "required": True},
+                {"name": "参数说明", "patterns": [r"parameters", r"arguments", r"参数"], "required": False},
+                {"name": "示例/Examples", "patterns": [r"examples", r"示例", r"usage"], "required": False},
             ]
         }
         
@@ -619,15 +821,7 @@ def check_document_quality(markdown_content: str, doc_type: str = "readme") -> D
         完整的检查结果
     """
     checker = DocumentCodeChecker()
-    results = checker.check_all(markdown_content)
-    
-    # 更新章节完整性检查结果（使用指定的文档类型）
-    results["section_completeness_check"] = checker.check_section_completeness(
-        markdown_content, doc_type
-    )
-    
-    # 重新生成汇总
-    results["summary"] = checker._generate_summary(results)
+    results = checker.check_all(markdown_content, doc_type)
     
     return results
 

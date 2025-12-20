@@ -7,7 +7,7 @@ from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
-GITHUB_TOKEN = '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'  # 替换为你的 GitHub Token
+GITHUB_TOKEN = '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'
 headers = {
     'Authorization': f'token {GITHUB_TOKEN}',
     'Accept': 'application/vnd.github.v3+json'
@@ -141,14 +141,153 @@ class GitHubService:
         
         return {'error': '未找到README文件'}
 
+    def get_document_content(self, owner: str, repo: str, doc_type: str) -> Dict[str, Any]:
+        """
+        获取仓库的指定类型文档内容
+        
+        Args:
+            owner: 仓库所有者
+            repo: 仓库名
+            doc_type: 文档类型 (readme, contributing, license, changelog, code_of_conduct)
+        
+        Returns:
+            包含文档内容和元数据的字典，或包含错误信息的字典
+        """
+        # 定义不同文档类型的可能文件名
+        doc_filenames = {
+            'readme': [
+                'README.md', 'readme.md', 'README.MD', 
+                'README', 'readme', 'README.txt', 'readme.txt'
+            ],
+            'contributing': [
+                'CONTRIBUTING.md', 'contributing.md', 
+                'CONTRIBUTING', 'contributing', 
+                '.github/CONTRIBUTING.md'
+            ],
+            'license': [
+                'LICENSE', 'license', 'LICENSE.md', 
+                'license.md', 'LICENSE.txt', 'license.txt'
+            ],
+            'changelog': [
+                'CHANGELOG.md', 'changelog.md', 'CHANGELOG', 
+                'HISTORY.md', 'history.md', 'CHANGES.md'
+            ],
+            'code_of_conduct': [
+                'CODE_OF_CONDUCT.md', 'code_of_conduct.md', 
+                'CODE_OF_CONDUCT', '.github/CODE_OF_CONDUCT.md'
+            ],
+            'security': [
+                'SECURITY.md', 'security.md', 
+                'SECURITY', '.github/SECURITY.md'
+            ],
+            'support': [
+                'SUPPORT.md', 'support.md', 
+                '.github/SUPPORT.md'
+            ],
+            'wiki': [
+                'wiki/Home.md', 'wiki/home.md', 'wiki/README.md',
+                'Wiki/Home.md', 'WIKI/Home.md',
+                'docs/wiki/Home.md', 'docs/Wiki/Home.md'
+            ],
+            'docs': [
+                'docs/README.md', 'docs/index.md', 'docs/INDEX.md',
+                'Docs/README.md', 'DOCS/README.md',
+                'documentation/README.md', 'Documentation/README.md'
+            ],
+            'installation': [
+                'INSTALL.md', 'install.md', 'INSTALLATION.md',
+                'docs/installation.md', 'docs/INSTALLATION.md',
+                'docs/install.md', 'docs/INSTALL.md'
+            ],
+            'usage': [
+                'USAGE.md', 'usage.md', 'docs/usage.md', 'docs/USAGE.md',
+                'docs/getting-started.md', 'docs/guide.md'
+            ],
+            'api': [
+                'API.md', 'api.md', 'docs/api.md', 'docs/API.md',
+                'docs/api-reference.md', 'docs/API-Reference.md'
+            ]
+        }
+        
+        # 获取指定文档类型的文件名列表
+        filenames = doc_filenames.get(doc_type.lower())
+        if not filenames:
+            return {'error': f'不支持的文档类型: {doc_type}'}
+        
+        # 尝试每个可能的文件名
+        for filename in filenames:
+            url = f'https://api.github.com/repos/{owner}/{repo}/contents/{filename}'
+            logger.info(f"尝试获取 {doc_type.upper()}: {url}")
+            
+            try:
+                response = self.session.get(url, headers=headers)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    if 'content' in data:
+                        # GitHub API返回的是base64编码的内容
+                        content = base64.b64decode(data['content']).decode('utf-8')
+                        logger.info(f"成功获取 {filename}, 大小: {len(content)} 字符")
+                        
+                        return {
+                            'content': content,
+                            'filename': filename,
+                            'doc_type': doc_type.lower(),
+                            'download_url': data.get('download_url', ''),
+                            'sha': data.get('sha', ''),
+                            'size': data.get('size', 0),
+                            'html_url': data.get('html_url', '')
+                        }
+                
+                elif response.status_code == 404:
+                    continue  # 尝试下一个文件名
+                    
+                elif response.status_code == 403:
+                    rate_limit = self.get_rate_limit()
+                    limits = rate_limit.get('resources', {}).get('core', {})
+                    error_msg = "GitHub API速率限制"
+                    if limits.get('remaining') == 0:
+                        reset_time = limits.get('reset')
+                        error_msg += f"，重置时间: {reset_time}"
+                    logger.error(error_msg)
+                    return {'error': error_msg}
+                    
+                elif response.status_code == 401:
+                    error_msg = "GitHub API认证失败"
+                    logger.error(error_msg)
+                    return {'error': error_msg}
+                    
+                else:
+                    logger.error(f"GitHub API错误: {response.status_code} - {response.text}")
+                    return {'error': f'GitHub API错误: {response.status_code}'}
+                    
+            except requests.exceptions.RequestException as e:
+                logger.error(f"网络请求错误: {e}")
+                return {'error': f'网络请求失败: {str(e)}'}
+            except Exception as e:
+                logger.error(f"处理响应错误: {e}")
+                return {'error': f'处理响应失败: {str(e)}'}
+        
+        return {'error': f'未找到{doc_type.upper()}文件'}
+
     def get_all_repo_docs(self, owner: str, repo: str) -> Dict[str, Any]:
-        """获取仓库的所有主要文档"""
+        """获取仓库的所有主要文档（12种类型）"""
         docs_to_find = {
+            # 核心文档（5种）
             'readme': ['README.md', 'readme.md', 'README', 'readme', 'README.txt'],
-            'contributing': ['CONTRIBUTING.md', 'contributing.md', 'CONTRIBUTING', 'contributing'],
-            'code_of_conduct': ['CODE_OF_CONDUCT.md', 'code_of_conduct.md', 'CODE_OF_CONDUCT'],
-            'changelog': ['CHANGELOG.md', 'changelog.md', 'CHANGELOG', 'HISTORY.md'],
-            'license': ['LICENSE', 'license', 'LICENSE.md', 'license.md', 'LICENSE.txt']
+            'contributing': ['CONTRIBUTING.md', 'contributing.md', 'CONTRIBUTING', 'contributing', '.github/CONTRIBUTING.md'],
+            'code_of_conduct': ['CODE_OF_CONDUCT.md', 'code_of_conduct.md', 'CODE_OF_CONDUCT', '.github/CODE_OF_CONDUCT.md'],
+            'changelog': ['CHANGELOG.md', 'changelog.md', 'CHANGELOG', 'HISTORY.md', 'history.md', 'CHANGES.md'],
+            'license': ['LICENSE', 'license', 'LICENSE.md', 'license.md', 'LICENSE.txt', 'license.txt'],
+            
+            # 扩展文档（7种）
+            'security': ['SECURITY.md', 'security.md', 'SECURITY', '.github/SECURITY.md'],
+            'support': ['SUPPORT.md', 'support.md', 'SUPPORT', '.github/SUPPORT.md'],
+            'wiki': ['wiki/Home.md', 'wiki/home.md', 'wiki/README.md', 'Wiki/Home.md', 'WIKI/Home.md'],
+            'docs': ['docs/README.md', 'docs/index.md', 'docs/INDEX.md', 'Docs/README.md', 'DOCS/README.md', 'documentation/README.md'],
+            'installation': ['INSTALL.md', 'install.md', 'INSTALLATION.md', 'installation.md', 'docs/installation.md', 'docs/INSTALLATION.md', 'docs/install.md'],
+            'usage': ['USAGE.md', 'usage.md', 'docs/usage.md', 'docs/USAGE.md', 'docs/getting-started.md', 'docs/guide.md'],
+            'api': ['API.md', 'api.md', 'docs/api.md', 'docs/API.md', 'docs/api-reference.md', 'docs/API-Reference.md']
         }
         
         results = {}
