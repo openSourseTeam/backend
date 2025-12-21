@@ -67,21 +67,36 @@ async def scan_repo_docs(request: DownloadRequest):
         owner, repo = github_service.extract_repo_info(request.repo_url)
         if not owner or not repo:
             raise HTTPException(status_code=400, detail="无效的GitHub仓库URL")
-            
+
+        # 获取仓库基本信息（包括stars、forks等）
+        repo_info = github_service.get_repo_info(owner, repo)
+        if not repo_info:
+            logger.warning("无法获取仓库信息，使用默认值")
+            repo_info = {}
+
         # 获取所有文档（12种类型）
         docs = github_service.get_all_repo_docs(owner, repo)
         
         # 统计找到的文档
         found_count = sum(1 for v in docs.values() if v is not None)
         logger.info(f"扫描完成，找到 {found_count}/12 个文档")
-        
+
+        # 构造返回的仓库信息
+        response_repo_info = {
+            "owner": owner,
+            "repo": repo,
+            "full_name": f"{owner}/{repo}",
+            "stargazers_count": repo_info.get("stargazers_count", 0),
+            "forks_count": repo_info.get("forks_count", 0),
+            "description": repo_info.get("description", ""),
+            "language": repo_info.get("language", ""),
+            "created_at": repo_info.get("created_at", ""),
+            "updated_at": repo_info.get("updated_at", "")
+        }
+
         return {
             "success": True,
-            "repo_info": {
-                "owner": owner,
-                "repo": repo,
-                "full_name": f"{owner}/{repo}"
-            },
+            "repo_info": response_repo_info,
             "docs": docs,
             "stats": {
                 "total_types": 12,
