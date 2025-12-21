@@ -24,6 +24,7 @@ class SelectiveAnalyzeRequest(BaseModel):
     docs: Dict[str, Any] = Field(..., description="文档内容字典")
     selected_doc_types: List[str] = Field(..., description="选择要分析的文档类型列表")
 
+
 class BatchOptimizeRequest(BaseModel):
     """批量优化请求"""
     documents: List[Dict[str, Any]] = Field(..., description="要优化的文档列表")

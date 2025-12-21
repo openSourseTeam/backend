@@ -143,8 +143,13 @@ async def analyze_project(request: SelectiveAnalyzeRequest):
         
         if not combined_markdown:
             raise HTTPException(status_code=400, detail="选择的文档都没有内容")
-        
-        # 2. AI 分析
+
+        # 2. 计算可读性指标
+        logger.info("开始计算可读性指标...")
+        readability_data = get_readability(combined_markdown)
+        logger.info("可读性指标计算完成")
+
+        # 3. AI 分析
         from ask import analyze_readme_with_llm
         from fastapi.concurrency import run_in_threadpool
 
@@ -159,13 +164,14 @@ async def analyze_project(request: SelectiveAnalyzeRequest):
         api_key = 'sk-99ed7f2e56bd478cb3147fd1593d4157'
         
         logger.info("开始调用 LLM 进行分析...")
-        ai_result = await run_in_threadpool(analyze_readme_with_llm, combined_markdown, simple_rule_checks, api_key)
+        ai_result = await run_in_threadpool(analyze_readme_with_llm, combined_markdown, readability_data, api_key)
         logger.info("LLM 分析完成")
         
         return {
             "success": True,
             "selected_doc_types": selected_types,
             "rule_checks": rule_check_results,
+            "readability": readability_data,
             "ai_analysis": ai_result
         }
 
@@ -238,6 +244,8 @@ async def optimize_document(request: OptimizeDocumentRequest):
         )
 
 
+
+
 @app.post("/api/batch-optimize", response_model=BatchOptimizeResponse)
 async def batch_optimize_documents(request: BatchOptimizeRequest):
     """
@@ -251,19 +259,19 @@ async def batch_optimize_documents(request: BatchOptimizeRequest):
     
     Args:
         documents: 文档列表，每个包含 doc_type, original_content, analysis_result
-    
+
     Returns:
         每个文档的优化结果和HTML差异对比
     """
     logger.info(f"收到批量优化请求，文档数量: {len(request.documents)}")
-    
+
     try:
         from ask import optimize_document_with_llm
         from fastapi.concurrency import run_in_threadpool
         import difflib
         
         api_key = 'sk-99ed7f2e56bd478cb3147fd1593d4157'
-        
+
         results = []
         diffs = []
         
