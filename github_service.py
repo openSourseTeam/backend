@@ -4,6 +4,7 @@ import logging
 import os
 from urllib.parse import urlparse
 from typing import Optional, Dict, Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger(__name__)
 
@@ -270,19 +271,46 @@ class GitHubService:
         
         return {'error': f'未找到{doc_type.upper()}文件'}
 
+    def _fetch_single_doc(self, owner: str, repo: str, doc_type: str, filename: str) -> Optional[Dict[str, Any]]:
+        """获取单个文档（内部方法，用于并发执行）"""
+        url = f'https://api.github.com/repos/{owner}/{repo}/contents/{filename}'
+        try:
+            response = self.session.get(url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                if 'content' in data:
+                    content = base64.b64decode(data['content']).decode('utf-8')
+                    logger.info(f"找到 {doc_type}: {filename}")
+                    return {
+                        'content': content,
+                        'filename': filename,
+                        'download_url': data.get('download_url', ''),
+                        'html_url': data.get('html_url', ''),
+                        'size': data.get('size', 0),
+                        'doc_type': doc_type
+                    }
+        except requests.exceptions.Timeout:
+            logger.warning(f"请求超时: {filename}")
+        except Exception as e:
+            logger.warning(f"检查 {filename} 时出错: {e}")
+        return None
+
     def get_all_repo_docs(self, owner: str, repo: str) -> Dict[str, Any]:
-        """获取仓库的所有主要文档（12种类型）"""
+        """
+        获取仓库的所有主要文档（12种类型）
+        使用并发请求优化性能，预计可将扫描时间从30秒降低到5-10秒
+        """
         docs_to_find = {
-            # 核心文档（5种）
+            # 核心文档（5种）- 按常见程度排序，优先尝试最常见的文件名
             'readme': ['README.md', 'readme.md', 'README', 'readme', 'README.txt'],
-            'contributing': ['CONTRIBUTING.md', 'contributing.md', 'CONTRIBUTING', 'contributing', '.github/CONTRIBUTING.md'],
-            'code_of_conduct': ['CODE_OF_CONDUCT.md', 'code_of_conduct.md', 'CODE_OF_CONDUCT', '.github/CODE_OF_CONDUCT.md'],
+            'contributing': ['CONTRIBUTING.md', '.github/CONTRIBUTING.md', 'contributing.md', 'CONTRIBUTING', 'contributing'],
+            'code_of_conduct': ['CODE_OF_CONDUCT.md', '.github/CODE_OF_CONDUCT.md', 'code_of_conduct.md', 'CODE_OF_CONDUCT'],
             'changelog': ['CHANGELOG.md', 'changelog.md', 'CHANGELOG', 'HISTORY.md', 'history.md', 'CHANGES.md'],
             'license': ['LICENSE', 'license', 'LICENSE.md', 'license.md', 'LICENSE.txt', 'license.txt'],
             
             # 扩展文档（7种）
-            'security': ['SECURITY.md', 'security.md', 'SECURITY', '.github/SECURITY.md'],
-            'support': ['SUPPORT.md', 'support.md', 'SUPPORT', '.github/SUPPORT.md'],
+            'security': ['SECURITY.md', '.github/SECURITY.md', 'security.md', 'SECURITY'],
+            'support': ['SUPPORT.md', '.github/SUPPORT.md', 'support.md', 'SUPPORT'],
             'wiki': ['wiki/Home.md', 'wiki/home.md', 'wiki/README.md', 'Wiki/Home.md', 'WIKI/Home.md'],
             'docs': ['docs/README.md', 'docs/index.md', 'docs/INDEX.md', 'Docs/README.md', 'DOCS/README.md', 'documentation/README.md'],
             'installation': ['INSTALL.md', 'install.md', 'INSTALLATION.md', 'installation.md', 'docs/installation.md', 'docs/INSTALLATION.md', 'docs/install.md'],
@@ -290,33 +318,45 @@ class GitHubService:
             'api': ['API.md', 'api.md', 'docs/api.md', 'docs/API.md', 'docs/api-reference.md', 'docs/API-Reference.md']
         }
         
-        results = {}
+        results = {doc_type: None for doc_type in docs_to_find.keys()}
         
+        # 准备所有需要尝试的请求任务
+        tasks = []
         for doc_type, filenames in docs_to_find.items():
-            found = False
             for filename in filenames:
-                url = f'https://api.github.com/repos/{owner}/{repo}/contents/{filename}'
-                try:
-                    response = self.session.get(url, headers=headers)
-                    if response.status_code == 200:
-                        data = response.json()
-                        if 'content' in data:
-                            content = base64.b64decode(data['content']).decode('utf-8')
-                            results[doc_type] = {
-                                'content': content,
-                                'filename': filename,
-                                'download_url': data.get('download_url', ''),
-                                'html_url': data.get('html_url', ''),
-                                'size': data.get('size', 0)
-                            }
-                            found = True
-                            logger.info(f"找到 {doc_type}: {filename}")
-                            break # 找到一种后缀即可
-                except Exception as e:
-                    logger.warning(f"检查 {filename} 时出错: {e}")
-                    continue
+                tasks.append((doc_type, filename))
+        
+        # 使用线程池并发执行请求
+        # 限制并发数为10，避免触发GitHub API速率限制
+        max_workers = min(10, len(tasks))
+        logger.info(f"开始并发扫描 {len(tasks)} 个文件，并发数: {max_workers}")
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # 提交所有任务
+            future_to_task = {
+                executor.submit(self._fetch_single_doc, owner, repo, doc_type, filename): (doc_type, filename)
+                for doc_type, filename in tasks
+            }
             
-            if not found:
-                results[doc_type] = None
+            # 处理完成的任务
+            for future in as_completed(future_to_task):
+                doc_type, filename = future_to_task[future]
+                try:
+                    result = future.result()
+                    # 如果找到文档且该类型还没有结果，则保存
+                    if result and results[doc_type] is None:
+                        results[doc_type] = {
+                            'content': result['content'],
+                            'filename': result['filename'],
+                            'download_url': result['download_url'],
+                            'html_url': result['html_url'],
+                            'size': result['size']
+                        }
+                        # 找到后可以取消该类型的其他未完成任务（可选优化）
+                except Exception as e:
+                    logger.warning(f"处理任务失败 ({doc_type}/{filename}): {e}")
+        
+        found_count = sum(1 for v in results.values() if v is not None)
+        logger.info(f"并发扫描完成，找到 {found_count}/12 个文档")
                 
         return results

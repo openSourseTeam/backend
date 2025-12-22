@@ -17,6 +17,7 @@ class OptimizeDocumentResponse(BaseModel):
     original_content: Optional[str] = None
     optimized_content: Optional[str] = None
     changes_summary: Optional[Dict[str, Any]] = None
+    diff_html: Optional[str] = None  # HTML格式的差异对比（行内高亮）
     error: Optional[str] = None
 
 class SelectiveAnalyzeRequest(BaseModel):

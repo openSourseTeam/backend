@@ -4,8 +4,13 @@ from typing import Dict, List, Any
 from urllib.parse import urlparse
 import logging
 import mistune
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
+
+# 全局链接检查缓存（避免重复检查相同链接）
+_link_cache = {}
 
 
 # 文档类型检查策略配置
@@ -78,9 +83,10 @@ class DocumentCodeChecker:
     
     def __init__(self):
         """初始化检查器"""
-        self.timeout = 5  # HTTP 请求超时时间
+        self.timeout = 3  # HTTP 请求超时时间（从5秒降低到3秒）
         self.link_check_enabled = True
         self.markdown_parser = mistune.create_markdown(renderer=None)  # 创建 Markdown 解析器
+        self.max_concurrent_link_checks = 10  # 最大并发链接检查数
     
     def get_check_strategy(self, doc_type: str) -> Dict[str, str]:
         """
@@ -171,30 +177,52 @@ class DocumentCodeChecker:
                 "note": "宽松模式：跳过链接有效性检查（适用于LICENSE等文档）"
             }
         
-        # 执行链接检查
+        # 执行链接检查（并发执行，提高性能）
         valid_links = []
         invalid_links = []
         timeout_links = []
         
-        for link_info in total_links:
-            url = link_info["url"]
-            status = self._check_single_link(url)
-            
-            link_result = {
-                "text": link_info["text"],
-                "url": url,
-                "type": link_info["type"],
-                "status": status["status"],
-                "status_code": status.get("status_code"),
-                "error": status.get("error")
+        # 使用线程池并发检查链接
+        max_workers = min(self.max_concurrent_link_checks, len(total_links))
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # 提交所有链接检查任务
+            future_to_link = {
+                executor.submit(self._check_single_link, link_info["url"]): link_info
+                for link_info in total_links
             }
             
-            if status["status"] == "valid":
-                valid_links.append(link_result)
-            elif status["status"] == "timeout":
-                timeout_links.append(link_result)
-            else:
-                invalid_links.append(link_result)
+            # 处理完成的任务
+            for future in as_completed(future_to_link):
+                link_info = future_to_link[future]
+                try:
+                    status = future.result()
+                    
+                    link_result = {
+                        "text": link_info["text"],
+                        "url": link_info["url"],
+                        "type": link_info["type"],
+                        "status": status["status"],
+                        "status_code": status.get("status_code"),
+                        "error": status.get("error")
+                    }
+                    
+                    if status["status"] == "valid":
+                        valid_links.append(link_result)
+                    elif status["status"] == "timeout":
+                        timeout_links.append(link_result)
+                    else:
+                        invalid_links.append(link_result)
+                        
+                except Exception as e:
+                    logger.error(f"链接检查失败: {link_info['url']} - {e}")
+                    invalid_links.append({
+                        "text": link_info["text"],
+                        "url": link_info["url"],
+                        "type": link_info["type"],
+                        "status": "error",
+                        "error": str(e)
+                    })
         
         # 根据严格程度判断是否通过
         if strictness == "normal":
@@ -218,7 +246,7 @@ class DocumentCodeChecker:
     
     def _check_single_link(self, url: str) -> Dict[str, Any]:
         """
-        检查单个链接的可访问性
+        检查单个链接的可访问性（带缓存）
         
         Args:
             url: 要检查的 URL
@@ -226,6 +254,10 @@ class DocumentCodeChecker:
         Returns:
             检查结果
         """
+        # 检查缓存
+        if url in _link_cache:
+            return _link_cache[url]
+        
         try:
             # 发送 HEAD 请求（比 GET 更快）
             response = requests.head(
@@ -245,33 +277,43 @@ class DocumentCodeChecker:
                 )
             
             if response.status_code < 400:
-                return {
+                result = {
                     "status": "valid",
                     "status_code": response.status_code
                 }
             else:
-                return {
+                result = {
                     "status": "invalid",
                     "status_code": response.status_code,
                     "error": f"HTTP {response.status_code}"
                 }
+            
+            # 缓存结果
+            _link_cache[url] = result
+            return result
                 
         except requests.exceptions.Timeout:
-            return {
+            result = {
                 "status": "timeout",
                 "error": "请求超时"
             }
+            _link_cache[url] = result
+            return result
         except requests.exceptions.RequestException as e:
-            return {
+            result = {
                 "status": "invalid",
                 "error": str(e)
             }
+            _link_cache[url] = result
+            return result
         except Exception as e:
             logger.error(f"检查链接时发生错误: {url}, 错误: {e}")
-            return {
+            result = {
                 "status": "error",
                 "error": str(e)
             }
+            _link_cache[url] = result
+            return result
     
     def check_code_blocks(self, markdown_content: str, strictness: str = "strict") -> Dict[str, Any]:
         """

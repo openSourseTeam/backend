@@ -182,12 +182,31 @@ async def analyze_project(request: SelectiveAnalyzeRequest):
         ai_result = await run_in_threadpool(analyze_readme_with_llm, combined_markdown, readability_data, api_key)
         logger.info("LLM 分析完成")
         
+        # 只返回选中文档的内容（不返回未选中的文档内容）
+        selected_docs = {}
+        for doc_type in selected_types:
+            if doc_type in docs and docs[doc_type]:
+                selected_docs[doc_type] = docs[doc_type]
+        
+        # 添加调试信息
+        debug_info = {
+            "analyzed_doc_count": len(selected_types),
+            "analyzed_doc_types": selected_types,
+            "total_content_length": len(combined_markdown),
+            "individual_doc_lengths": {
+                doc_type: len(docs[doc_type]['content']) if doc_type in docs and docs[doc_type] else 0
+                for doc_type in selected_types
+            }
+        }
+        
         return {
             "success": True,
             "selected_doc_types": selected_types,
+            "selected_docs": selected_docs,  # 只包含选中的文档内容
             "rule_checks": rule_check_results,
             "readability": readability_data,
-            "ai_analysis": ai_result
+            "ai_analysis": ai_result,
+            "debug_info": debug_info  # 调试信息，帮助排查问题
         }
 
     except HTTPException:
@@ -244,11 +263,15 @@ async def optimize_document(request: OptimizeDocumentRequest):
             "optimized_lines": optimized_content.count('\n') + 1,
         }
         
+        # 生成差异对比HTML（行内高亮）
+        diff_html = _generate_inline_diff_html(request.original_content, optimized_content)
+        
         return OptimizeDocumentResponse(
             success=True,
             original_content=request.original_content,
             optimized_content=optimized_content,
-            changes_summary=changes_summary
+            changes_summary=changes_summary,
+            diff_html=diff_html
         )
         
     except Exception as e:
@@ -359,29 +382,160 @@ async def batch_optimize_documents(request: BatchOptimizeRequest):
         )
 
 
+def _generate_inline_diff_html(original: str, optimized: str) -> str:
+    """
+    生成行内差异高亮HTML（类似 Cursor 编辑器风格）
+    删除的内容用红色背景和删除线，添加的内容用绿色背景
+    
+    Returns:
+        HTML字符串，包含完整的样式和差异高亮
+    """
+    import difflib
+    import html
+    
+    # 转义HTML特殊字符
+    def escape_html(text: str) -> str:
+        return html.escape(text)
+    
+    # 将文本分割成单词和空格（保留空白字符）
+    def tokenize(text: str):
+        import re
+        # 匹配非空白字符序列或空白字符序列
+        tokens = re.findall(r'\S+|\s+', text)
+        return tokens
+    
+    # 按行处理，每行内部进行词级差异对比
+    original_lines = original.splitlines(True)  # 保留换行符
+    optimized_lines = optimized.splitlines(True)
+    
+    html_parts = ['<div class="diff-container" style="font-family: \'Consolas\', \'Monaco\', \'Courier New\', monospace; line-height: 1.8; padding: 20px; background: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; max-width: 100%; overflow-x: auto;">']
+    html_parts.append('<style>')
+    html_parts.append('''
+        .diff-deleted {
+            background-color: #ffebee;
+            color: #c62828;
+            text-decoration: line-through;
+            padding: 2px 4px;
+            border-radius: 3px;
+            display: inline-block;
+        }
+        .diff-added {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+            padding: 2px 4px;
+            border-radius: 3px;
+            display: inline-block;
+        }
+        .diff-unchanged {
+            color: #333;
+        }
+        .diff-line {
+            margin: 2px 0;
+            padding: 4px 8px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            border-left: 3px solid transparent;
+        }
+        .diff-line-deleted {
+            background-color: #fff5f5;
+            border-left-color: #ff5252;
+        }
+        .diff-line-added {
+            background-color: #f1f8f4;
+            border-left-color: #4caf50;
+        }
+        .diff-line-modified {
+            background-color: #fffef0;
+            border-left-color: #ffc107;
+        }
+    ''')
+    html_parts.append('</style>')
+    
+    # 使用 SequenceMatcher 进行行级对比
+    line_matcher = difflib.SequenceMatcher(None, original_lines, optimized_lines)
+    
+    for tag, i1, i2, j1, j2 in line_matcher.get_opcodes():
+        if tag == 'equal':
+            # 相同的行，检查行内是否有差异
+            for line_idx in range(i1, i2):
+                line = original_lines[line_idx]
+                # 如果行完全相同，直接显示
+                html_parts.append(f'<div class="diff-line diff-unchanged">{escape_html(line)}</div>')
+                
+        elif tag == 'delete':
+            # 删除的行（红色背景）
+            for line_idx in range(i1, i2):
+                line = original_lines[line_idx]
+                html_parts.append(f'<div class="diff-line diff-line-deleted"><span class="diff-deleted">{escape_html(line.rstrip())}</span></div>')
+                
+        elif tag == 'insert':
+            # 添加的行（绿色背景）
+            for line_idx in range(j1, j2):
+                line = optimized_lines[line_idx]
+                html_parts.append(f'<div class="diff-line diff-line-added"><span class="diff-added">{escape_html(line.rstrip())}</span></div>')
+                
+        elif tag == 'replace':
+            # 替换的行：进行词级差异对比
+            for orig_idx in range(i1, i2):
+                orig_line = original_lines[orig_idx]
+                # 尝试找到对应的优化行
+                if j1 < j2:
+                    opt_line = optimized_lines[j1]
+                    j1 += 1
+                    
+                    # 对这两行进行词级差异对比
+                    orig_tokens = tokenize(orig_line)
+                    opt_tokens = tokenize(opt_line)
+                    word_matcher = difflib.SequenceMatcher(None, orig_tokens, opt_tokens)
+                    
+                    html_parts.append('<div class="diff-line diff-line-modified">')
+                    for word_tag, wi1, wi2, wj1, wj2 in word_matcher.get_opcodes():
+                        if word_tag == 'equal':
+                            for token in orig_tokens[wi1:wi2]:
+                                html_parts.append(f'<span class="diff-unchanged">{escape_html(token)}</span>')
+                        elif word_tag == 'delete':
+                            deleted_text = ''.join(orig_tokens[wi1:wi2])
+                            html_parts.append(f'<span class="diff-deleted">{escape_html(deleted_text)}</span>')
+                        elif word_tag == 'insert':
+                            added_text = ''.join(opt_tokens[wj1:wj2])
+                            html_parts.append(f'<span class="diff-added">{escape_html(added_text)}</span>')
+                        elif word_tag == 'replace':
+                            deleted_text = ''.join(orig_tokens[wi1:wi2])
+                            added_text = ''.join(opt_tokens[wj1:wj2])
+                            html_parts.append(f'<span class="diff-deleted">{escape_html(deleted_text)}</span>')
+                            html_parts.append(f'<span class="diff-added">{escape_html(added_text)}</span>')
+                    html_parts.append('</div>')
+                else:
+                    # 没有对应的优化行，显示为删除
+                    html_parts.append(f'<div class="diff-line diff-line-deleted"><span class="diff-deleted">{escape_html(orig_line.rstrip())}</span></div>')
+            
+            # 处理剩余的添加行
+            while j1 < j2:
+                opt_line = optimized_lines[j1]
+                html_parts.append(f'<div class="diff-line diff-line-added"><span class="diff-added">{escape_html(opt_line.rstrip())}</span></div>')
+                j1 += 1
+    
+    html_parts.append('</div>')
+    
+    return ''.join(html_parts)
+
+
 def _generate_diff_html(original: str, optimized: str) -> tuple[str, Dict[str, int]]:
     """
-    生成HTML格式的差异对比，带高亮显示
+    生成HTML格式的差异对比（行内高亮显示）
+    删除的内容用红色背景和删除线，添加的内容用绿色背景
     
     Returns:
         (diff_html, stats) - HTML字符串和统计信息
     """
     import difflib
     
-    original_lines = original.splitlines(keepends=True)
-    optimized_lines = optimized.splitlines(keepends=True)
-    
-    differ = difflib.HtmlDiff(wrapcolumn=80)
-    diff_html = differ.make_table(
-        original_lines,
-        optimized_lines,
-        fromdesc='原始文档',
-        todesc='优化后文档',
-        context=True,
-        numlines=3
-    )
+    # 生成行内差异高亮
+    inline_diff_html = _generate_inline_diff_html(original, optimized)
     
     # 统计变化
+    original_lines = original.splitlines(keepends=True)
+    optimized_lines = optimized.splitlines(keepends=True)
     diff = list(difflib.unified_diff(original_lines, optimized_lines, lineterm=''))
     additions = sum(1 for line in diff if line.startswith('+') and not line.startswith('+++'))
     deletions = sum(1 for line in diff if line.startswith('-') and not line.startswith('---'))
@@ -389,10 +543,10 @@ def _generate_diff_html(original: str, optimized: str) -> tuple[str, Dict[str, i
     stats = {
         'additions': additions,
         'deletions': deletions,
-        'modifications': min(additions, deletions)  # 估算修改数
+        'modifications': min(additions, deletions)
     }
     
-    return diff_html, stats
+    return inline_diff_html, stats
 
 
 @app.get("/")
