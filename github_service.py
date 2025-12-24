@@ -7,8 +7,7 @@ from typing import Optional, Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger(__name__)
-
-GITHUB_TOKEN = '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'
+GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', 'default_token')
 headers = {
     'Authorization': f'token {GITHUB_TOKEN}',
     'Accept': 'application/vnd.github.v3+json'
@@ -56,7 +55,8 @@ class GitHubService:
     def get_rate_limit(self) -> Dict[str, Any]:
         """获取GitHub API速率限制信息"""
         try:
-            response = self.session.get('https://api.github.com/rate_limit')
+            response = self.session.get('https://api.github.com/rate_limit', headers=headers)
+            print(response)
             if response.status_code == 200:
                 return response.json()
         except Exception as e:
