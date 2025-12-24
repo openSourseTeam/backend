@@ -248,6 +248,7 @@ optimize_system_prompt_template = '''
 3. 修复识别出的问题（格式、语法、内容完整性等）
 4. 改善表达清晰度和可读性
 5. 确保优化后的文档符合{doc_type_name}的最佳实践
+6. 优化后的文档必须使用与原始文档相同的语言（如果原始文档是中文，优化后也必须是中文；如果原始文档是英文，优化后也必须是英文）
 
 重要提示：{optimization_tips}
 
@@ -256,6 +257,7 @@ optimize_system_prompt_template = '''
 - 不要添加任何解释或说明
 - 保持Markdown格式规范
 - 确保所有链接、代码块、列表格式正确
+- 必须使用与原始文档相同的语言撰写优化后的文档
 '''.strip()
 
 optimize_user_prompt_template = '''
@@ -284,6 +286,7 @@ optimize_user_prompt_template = '''
 4. 优化代码示例（如果有问题）
 5. 保持原有信息的准确性
 6. 确保文档结构符合{doc_type_name}的最佳实践
+7. 优化后的文档必须使用与原始文档完全相同的语言（如果原始文档是中文，优化后必须全部使用中文；如果原始文档是英文，优化后必须全部使用英文。不要混合使用不同语言）
 
 请直接输出优化后的完整Markdown文档，不要添加任何额外说明。
 '''.strip()
@@ -304,6 +307,18 @@ def optimize_document_with_llm(original_content, analysis_result, api_key, doc_t
     """
     print(f"正在优化 {doc_type.upper()} 文档... 原始长度: {len(original_content)}")
     client = openai.OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+    
+    import re
+    chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', original_content))
+    english_chars = len(re.findall(r'[a-zA-Z]', original_content))
+    total_chars = chinese_chars + english_chars
+    if total_chars > 0:
+        chinese_ratio = chinese_chars / total_chars
+        document_language = '中文' if chinese_ratio > 0.3 else '英文'
+    else:
+        document_language = '英文' 
+    
+    print(f"检测到原始文档语言: {document_language}")
     
     # 获取文档类型特定配置
     doc_config = get_doc_specific_prompt(doc_type)
@@ -328,6 +343,11 @@ def optimize_document_with_llm(original_content, analysis_result, api_key, doc_t
         focus_areas='、'.join(doc_config['focus_areas']),
         optimization_tips=doc_config['optimization_tips']
     )
+    
+    if document_language == '中文':
+        system_content += "\n\n【重要语言要求】原始文档是中文，优化后的文档必须完全使用中文撰写，不要使用英文。"
+    else:
+        system_content += "\n\n【Important Language Requirement】The original document is in English. The optimized document must be written entirely in English. Do not use Chinese."
     
     # 构建针对文档类型的用户提示词
     user_content = optimize_user_prompt_template.format(
