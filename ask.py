@@ -389,7 +389,8 @@ def optimize_document_with_llm(original_content, analysis_result, api_key, doc_t
                 {"role": "system", "content": system_content},
                 {"role": "user", "content": user_content}
             ],
-            timeout=180  # 优化可能需要更长时间
+            timeout=180,  # 优化可能需要更长时间
+            stream = True
         )
         
         optimized_content = response.choices[0].message.content.strip()
