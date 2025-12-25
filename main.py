@@ -140,7 +140,7 @@ async def analyze_project(request: SelectiveAnalyzeRequest):
             raise HTTPException(status_code=400, detail="未选择要分析的文档")
             
         # 1. 规则检查（只检查选中的文档）
-        rule_check_results = {}
+        # rule_check_results = {}
         combined_markdown = ""
         
         for doc_type in selected_types:
@@ -151,8 +151,8 @@ async def analyze_project(request: SelectiveAnalyzeRequest):
                 combined_markdown += f"\n\n# FILE: {doc_info['filename']} ({doc_type.upper()})\n\n{content}"
                 
                 # 单个文档规则检查
-                check_result = check_document_quality(content, doc_type)
-                rule_check_results[doc_type] = check_result
+                # check_result = check_document_quality(content, doc_type)
+                # rule_check_results[doc_type] = check_result
             else:
                 logger.warning(f"文档类型 {doc_type} 不存在或无内容")
         
@@ -169,12 +169,12 @@ async def analyze_project(request: SelectiveAnalyzeRequest):
         from fastapi.concurrency import run_in_threadpool
 
         # 简化规则检查结果给LLM
-        simple_rule_checks = {}
-        for dtype, res in rule_check_results.items():
-            simple_rule_checks[dtype] = {
-                "issues_count": res['summary']['total_issues'],
-                "missing_sections": res['section_completeness_check'].get('missing_sections', [])
-            }
+        # simple_rule_checks = {}
+        # for dtype, res in rule_check_results.items():
+        #     simple_rule_checks[dtype] = {
+        #         "issues_count": res['summary']['total_issues'],
+        #         "missing_sections": res['section_completeness_check'].get('missing_sections', [])
+        #     }
             
         api_key = 'sk-99ed7f2e56bd478cb3147fd1593d4157'
         
@@ -198,12 +198,11 @@ async def analyze_project(request: SelectiveAnalyzeRequest):
                 for doc_type in selected_types
             }
         }
-        
         return {
             "success": True,
             "selected_doc_types": selected_types,
             "selected_docs": selected_docs,  # 只包含选中的文档内容
-            "rule_checks": rule_check_results,
+            # "rule_checks": rule_check_results,
             "readability": readability_data,
             "ai_analysis": ai_result,
             "debug_info": debug_info  # 调试信息，帮助排查问题
