@@ -179,7 +179,7 @@ async def analyze_project(request: SelectiveAnalyzeRequest):
         api_key = 'sk-99ed7f2e56bd478cb3147fd1593d4157'
         
         logger.info("开始调用 LLM 进行分析...")
-        ai_result = await run_in_threadpool(analyze_readme_with_llm, combined_markdown, readability_data, api_key)
+        ai_result = await run_in_threadpool(analyze_readme_with_llm, combined_markdown, readability_data, api_key, selected_types)
         logger.info("LLM 分析完成")
         
         # 只返回选中文档的内容（不返回未选中的文档内容）

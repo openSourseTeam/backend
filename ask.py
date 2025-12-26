@@ -86,153 +86,214 @@ def get_doc_specific_prompt(doc_type="readme"):
 
 
 system_prompt = '''
-你是一名资深的开源项目维护者和技术文档工程师，专注于评估开源项目文档的整体质量。请严格按照指定的JSON格式输出评估结果，不要添加任何额外的解释或标记。
+你是一名资深的开源项目维护者和技术文档工程师，专注于评估开源项目文档的质量。
 
-评估维度：
-1. 完整性 - 评估必要文档（README, CONTRIBUTING, CODE_OF_CONDUCT等）是否齐全，内容是否完整
-2. 清晰度 - 评估语言表达是否清晰易懂，逻辑是否顺畅
-3. 实用性 - 评估用户能否根据文档快速上手使用项目，以及开发者能否顺利参与贡献
-4. 规范性 - 评估格式排版、链接有效性、代码示例等规范性
+【核心约束】
+你将只收到用户明确选择的文档进行评估。你的所有分析、评分、建议都必须严格限制在这些文档范围内。
+绝对不要提及、评论或建议任何用户未提供的文档类型。
 
-输出必须是纯JSON格式，包含以下字段：
-- overall_score: 总体评分（0-100）
-- dimension_scores: 各维度评分（0-100）
-- strengths: 项目文档的整体优点列表
-- missing_sections: 缺失的必要文档或章节列表
-- suggestions: 具体的改进建议列表
-- convention_issues: 规范性问题和格式错误列表
-- beginner_confusion_points: 新手（用户或贡献者）最可能困惑的地方
-- code_quality_issues: 代码示例质量问题列表
-- structural_issues: 信息组织结构问题列表
-- language_issues: 语言表达问题列表
-- priority_recommendations: 优先级改进建议列表（按重要性排序）
+评估维度（针对每个提供的文档）：
+1. 结构完整性 - 该类型文档的标准章节是否齐全
+2. 内容质量 - 信息是否准确、充分、有价值
+3. 可读性 - 语言表达是否清晰易懂，逻辑是否顺畅
+4. 代码示例 - 代码示例是否完整、正确、安全
+5. 新手友好度 - 新手能否轻松理解和使用
+6. 维护性 - 格式规范、链接有效性、易于维护
+7. 国际化 - 语言使用、术语统一性
 
-请基于提供的项目文档内容（可能包含README, CONTRIBUTING等多个文件）进行客观、专业的评估。
+输出必须是纯JSON格式，包含以下字段（所有字段都是必需的，不能为空）：
+- overall_score: 总体评分（0-100），基于所有提供的文档
+- dimension_scores: 每个文档的各维度评分（7个维度，见上方列表），必须为每个提供的文档类型都提供评分
+- strengths: 提供的文档的优点列表（至少3-5条，不要提及未提供的文档）
+- missing_sections: 提供的文档中缺失的章节列表（指文档内部章节，不是缺失的文档类型），如果没有缺失章节，可以是空数组[]
+- suggestions: 针对提供的文档内容的具体改进建议（至少3-5条）
+- convention_issues: 规范性问题和格式错误列表，如果没有问题，可以是空数组[]
+- beginner_confusion_points: 新手可能困惑的地方（至少2-3条）
+- code_quality_issues: 代码示例质量问题列表，如果没有代码示例或没有问题，可以是空数组[]
+- structural_issues: 信息组织结构问题列表，如果没有问题，可以是空数组[]
+- language_issues: 语言表达问题列表，如果没有问题，可以是空数组[]
+- priority_recommendations: 优先级改进建议列表（至少3-5条，只针对提供的文档内容）
+
+【重要】无论分析的是README、CONTRIBUTING、CHANGELOG还是其他任何文档类型，都必须完整输出上述所有字段。不能因为文档类型不同就省略某些字段。
+
+【重要】系统支持12种文档类型：readme、contributing、code_of_conduct、changelog、license、security、support、wiki、docs、installation、usage、api
+但用户每次只会选择其中的部分文档进行分析。你必须只分析用户实际提供的文档。
 
 请勿在最终输出中添加任何解释。您的输出必须遵循以下格式:
 
 **EXAMPLE**
+（下面示例假设用户选择了installation和usage两个文档）
 
 ```json
 {
-  "overall_score": 78,
+  "overall_score": 75,
   "dimension_scores": {
-    "readme":{
+    "installation":{
+        "结构完整性": 70,
+        "内容质量": 75,
+        "可读性": 80,
+        "代码示例": 65,
+        "新手友好度": 72,
+        "维护性": 78,
+        "国际化": 60
+    },
+    "usage":{
         "结构完整性": 75,
         "内容质量": 80,
         "可读性": 85,
         "代码示例": 70,
-        "新手友好度": 65,
-        "维护性": 78,
-        "国际化": 60
-    },
-    "contributing":{
-        "结构完整性": 75,
-        "内容质量": 80,
-        "可读性": 85,
-        "代码示例": 70,
-        "新手友好度": 65,
-        "维护性": 78,
-        "国际化": 60
-    },
-    "code_of_conduct":{
-        "结构完整性": 75,
-        "内容质量": 80,
-        "可读性": 85,
-        "代码示例": 70,
-        "新手友好度": 65,
-        "维护性": 78,
-        "国际化": 60
-    },
-    ...
+        "新手友好度": 78,
+        "维护性": 80,
+        "国际化": 65
+    }
   },
   "strengths": [
-    "README简介清晰，准确描述了核心价值",
-    "包含详细的CONTRIBUTING指南，对贡献者友好",
-    "安装步骤基本可行"
+    "INSTALLATION文档的安装步骤清晰详细",
+    "USAGE文档包含丰富的使用示例",
+    "两个文档的格式规范统一"
   ],
   "missing_sections": [
-    "缺少CODE_OF_CONDUCT文档",
-    "README中缺少详细的配置说明",
-    "CONTRIBUTING中未说明如何运行测试"
+    "INSTALLATION文档中缺少故障排查章节",
+    "USAGE文档中缺少高级用法说明"
   ],
   "beginner_confusion_points": [
-    "安装步骤中提到的'环境变量配置'未说明具体方法",
-    "贡献指南未说明分支命名规范"
+    "INSTALLATION中提到的'依赖项'未详细说明版本要求",
+    "USAGE中某些参数的含义不够清楚"
   ],
   "code_quality_issues": [
-    "示例代码中硬编码了API密钥",
-    "缺少必要的错误处理代码"
+    "USAGE文档的示例代码缺少错误处理",
+    "INSTALLATION的命令示例未说明执行环境"
   ],
   "structural_issues": [
-    "安装步骤与配置说明分散在不同章节",
-    "贡献指南与README部分内容重复"
+    "INSTALLATION文档的章节顺序可以优化",
+    "USAGE文档的示例分布不够均衡"
   ],
   "language_issues": [
-    "技术术语使用不够准确",
-    "存在拼写错误"
+    "部分技术术语表达不够准确",
+    "存在个别拼写错误"
   ],
   "priority_recommendations": [
-    "添加CODE_OF_CONDUCT文档以完善社区规范",
-    "完善CONTRIBUTING文档，补充测试运行说明",
-    "修复代码示例中的安全风险"
+    "在INSTALLATION文档中补充故障排查指南",
+    "完善USAGE文档的示例代码，增加错误处理",
+    "统一两个文档中的术语使用"
   ],
   "suggestions": [
-    "添加配置文件的详细说明",
-    "增加故障排除章节",
-    "统一术语使用"
+    "优化INSTALLATION文档的章节结构",
+    "为USAGE文档增加快速开始部分",
+    "检查并修正拼写错误"
   ],
   "convention_issues": [
-    "部分标题层级使用不当",
-    "代码块缺少语言标识"
+    "部分代码块缺少语言标识",
+    "标题层级使用不够一致"
   ]
 }
 ```
+
+注意：
+1. 上述示例仅针对installation和usage两个文档，没有提及其他未选中的文档类型（如readme、contributing等）。
+2. 你在实际分析时，也必须严格遵循这个原则，只分析和评论用户实际提供的文档。
+3. **无论分析的是哪种文档类型（README、CONTRIBUTING、CHANGELOG、LICENSE、SECURITY等），都必须输出完整的JSON结构，包含所有字段**：
+   - strengths 必须至少3-5条
+   - suggestions 必须至少3-5条
+   - beginner_confusion_points 必须至少2-3条
+   - priority_recommendations 必须至少3-5条
+   - 其他字段如果没有问题，可以是空数组[]，但不能省略
+4. 不要因为文档类型不同就减少输出内容或省略字段。
 '''.strip()
 
 user_prompt = '''
-请对以下开源项目的文档集合进行全面质量评估：
+【严格限制】本次分析ONLY评估以下文档类型：{selected_doc_types}
+
+请对以下提供的文档进行质量评估：
 
 {docs_content}
+
+【核心原则 - 请务必遵守】
+1. 只分析上面明确列出的文档类型：{selected_doc_types}
+2. 所有的问题分析、改进建议、优缺点评价，都只能针对这些已选中的文档
+3. 绝对不要在任何分析、建议、评论中提及其他文档类型（如README、CHANGELOG、LICENSE等未选中的文档）
+4. 如果某个文档类型没有在选中列表中，就完全不要提及它的名字
+
+【禁止行为示例】
+❌ 错误："建议完善README文档" （如果README未被选中）
+❌ 错误："缺少LICENSE文件" （如果LICENSE未被选中）
+❌ 错误："应该在CHANGELOG中记录版本信息" （如果CHANGELOG未被选中）
+❌ 错误："建议添加安全政策文档" （如果SECURITY未被选中）
+✅ 正确："CONTRIBUTING文档中的开发环境配置不够详细" （如果CONTRIBUTING被选中）
+✅ 正确："当前文档的代码示例缺少错误处理" （针对选中的文档）
 
 初步调用的规则检查结果（仅供参考）：
 {rule_checks}
 
-请从以下维度进行深入分析：
+请从以下维度进行深入分析（只针对选中的文档：{selected_doc_types}）：
 
-1. 【基础完整性检查】
-判断核心文档（README, CONTRIBUTING, CODE_OF_CONDUCT, LICENSE, CHANGELOG）是否齐全，核心章节是否缺失。
+1. 【文档完整性检查】
+检查已提供的文档中，该类型文档自身的标准章节是否齐全。
+注意：只检查已提供文档自身的章节完整性，不要提及未提供的文档类型。
 
 2. 【新手可用性评估】
-从新手用户和新手贡献者的角度出发：
-- 仅凭文档是否能成功安装和运行？
-- 是否清楚如何提交第一个PR？
-- 识别困惑点。
+基于已提供的文档，评估：
+- 新手用户能否根据这些文档成功安装和运行？
+- 新手贡献者能否清楚如何参与贡献？
+- 识别新手在阅读这些文档时可能的困惑点。
+注意：只基于已提供的文档进行评估，不要提及其他文档。
 
 3. 【代码示例质量检查】
-检查所有文档中的代码示例：
+检查已提供文档中的代码示例：
 - 是否完整可运行？
 - 是否存在安全风险？
+- 是否有清晰的注释说明？
 
 4. 【信息组织结构评估】
-评估整体架构：
-- 文档间链接是否通畅？
-- 逻辑流程是否清晰？
+评估已提供文档的内部结构：
+- 文档内部结构是否清晰？
+- 信息层次是否合理？
 
 5. 【语言表达质量检查】
-检查表达是否准确、友好、简洁。
+检查已提供文档的表达质量：
+- 语言是否准确、友好、简洁？
+- 术语使用是否一致？
+- 是否有语法或拼写错误？
 
 6. 【优先级改进建议】
-提供3-5个最优先的改进建议。
+针对已提供的文档内容本身，提供3-5个最优先的改进建议。
+严格要求：
+- 只针对选中的文档（{selected_doc_types}）的内容提出改进建议
+- 不要建议"添加XX文档"或"完善XX文档"（如果XX文档没有被选中）
+- 所有建议必须是针对已有文档内容的改进，而不是建议添加新文档类型
+- 例如：可以说"当前文档的示例代码需要增加注释"，但不能说"建议添加README文档"
 
-请确保评估客观、具体。
+【最后强调 - 输出要求】
+1. 你的所有输出（strengths、missing_sections、suggestions、beginner_confusion_points、code_quality_issues、structural_issues、language_issues、priority_recommendations）都必须严格限制在选中的文档范围内：{selected_doc_types}
+2. 不要提及任何未选中的文档类型！
+3. **必须完整输出所有JSON字段**，包括：
+   - strengths: 至少列出3-5个优点
+   - suggestions: 至少提供3-5条改进建议
+   - beginner_confusion_points: 至少识别2-3个困惑点
+   - priority_recommendations: 至少提供3-5条优先级建议
+   - 其他字段如果确实没有问题，可以是空数组[]，但不能省略字段
+4. 无论分析的是哪种文档类型（README、CONTRIBUTING、CHANGELOG、LICENSE等），都必须提供完整的分析结果，不能因为文档类型不同就减少输出内容。
 '''.strip()
 
 
 
 
-def analyze_readme_with_llm(markdown_content, readability, api_key):
-    print(f"正在调用 LLM API... 文档长度: {len(markdown_content)}")
+def analyze_readme_with_llm(markdown_content, readability, api_key, selected_types=None):
+    """
+    使用LLM分析文档质量（支持单文档或多文档合并分析）
+    
+    Args:
+        markdown_content: 文档内容（可以是单个文档或多个文档合并后的内容）
+        readability: 可读性指标
+        api_key: API密钥
+        selected_types: 选中的文档类型列表
+    """
+    if selected_types is None:
+        selected_types = ["readme"]
+    
+    selected_types_str = "、".join(selected_types)
+    print(f"正在调用 LLM API 分析文档... 文档长度: {len(markdown_content)}")
+    print(f"选中的文档类型: {selected_types_str}")
     client = openai.OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
     
     try:
@@ -240,7 +301,11 @@ def analyze_readme_with_llm(markdown_content, readability, api_key):
             model="deepseek-chat",  # 或 "gpt-3.5-turbo"
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt.format(docs_content=markdown_content, rule_checks=json.dumps(readability))}
+                {"role": "user", "content": user_prompt.format(
+                    docs_content=markdown_content, 
+                    selected_doc_types=selected_types_str,
+                    rule_checks=json.dumps(readability)
+                )}
             ],
             response_format={"type": "json_object"},  # 强制JSON输出
             timeout=120  # 设置超时时间为 120 秒
@@ -390,7 +455,7 @@ def optimize_document_with_llm(original_content, analysis_result, api_key, doc_t
                 {"role": "user", "content": user_content}
             ],
             timeout=180,  # 优化可能需要更长时间
-            stream = True
+            stream=False  # 改为非流式，简化处理
         )
         
         optimized_content = response.choices[0].message.content.strip()
